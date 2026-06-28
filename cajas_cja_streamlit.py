@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+from supabase import create_client, Client as SupabaseClient
 import pandas as pd
 import plotly.express as px
 import time
@@ -7,18 +7,7 @@ import time
 SUPABASE_URL = "https://zidtwltdfdwcixqmiksj.supabase.co"
 SUPABASE_KEY = "sb_publishable_BPsbWExEt-F4MKfOILr_LA_zIl6P8yd"
 
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json"
-}
-
-
-def obtener_datos():
-    url = f"{SUPABASE_URL}/rest/v1/Cajas_Cja?select=*&order=id_pedido.desc"
-    resp = requests.get(url, headers=HEADERS)
-    return resp.json()
-
+supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(
     page_title="Cartonera — Panel de Control",
@@ -26,6 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- ESTILOS ---
 st.markdown("""
 <style>
     .metric-card {
@@ -38,6 +28,7 @@ st.markdown("""
     }
     .metric-card h1 { font-size: 3rem; margin: 0; }
     .metric-card p  { font-size: 1rem; margin: 0; opacity: 0.8; }
+
     .estado-en-proceso {
         background: linear-gradient(135deg, #1a6b3a, #27ae60);
         border-radius: 12px;
@@ -69,16 +60,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def obtener_datos():
+    resultado = supabase.table("Cajas_Cja").select("*").order("id_pedido", desc=True).execute()
+    return resultado.data
+
+
 def badge_estado(estado):
     clase = {
         "En proceso": "estado-en-proceso",
         "Detenido":   "estado-detenido",
         "Finalizado": "estado-finalizado",
     }.get(estado, "estado-finalizado")
-    icono = "🟢" if estado == "En proceso" else "🔴" if estado == "Detenido" else "✅"
-    return f'<span class="{clase}">{icono} {estado}</span>'
+    return f'<span class="{clase}">{"🟢" if estado == "En proceso" else "🔴" if estado == "Detenido" else "✅"} {estado}</span>'
 
 
+# --- HEADER ---
 st.title("📦 Panel de Control — Producción")
 st.divider()
 
@@ -88,9 +84,10 @@ if not datos:
     st.info("No hay pedidos registrados aún.")
     time.sleep(3)
     st.rerun()
-    st.stop()
 
 df = pd.DataFrame(datos)
+
+# --- PEDIDO ACTIVO ---
 ultimo = datos[0]
 estado = ultimo.get("estado_pedido", "—")
 
@@ -103,32 +100,41 @@ with col_estado:
 st.markdown("<br>", unsafe_allow_html=True)
 
 col1, col2, col3 = st.columns(3)
+
 with col1:
     st.markdown(f"""
     <div class="metric-card">
         <p>Cajas Chicas</p>
         <h1>{ultimo['cajas_chicas']}</h1>
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
+
 with col2:
     st.markdown(f"""
     <div class="metric-card">
         <p>Cajas Grandes</p>
         <h1>{ultimo['cajas_grandes']}</h1>
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
+
 with col3:
     st.markdown(f"""
     <div class="metric-card">
         <p>Total Cajas</p>
         <h1>{ultimo['total_cajas']}</h1>
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
 st.divider()
 
+# --- GRÁFICOS ---
 st.subheader("📊 Producción por Pedido")
+
 df_grafico = df.copy()
 df_grafico["id_pedido"] = df_grafico["id_pedido"].astype(str)
 
 col_g1, col_g2 = st.columns(2)
+
 with col_g1:
     fig1 = px.bar(
         df_grafico,
@@ -139,7 +145,11 @@ with col_g1:
         color_discrete_map={"cajas_chicas": "#2980b9", "cajas_grandes": "#27ae60"},
         title="Cajas Chicas vs Grandes por Pedido"
     )
-    fig1.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+    fig1.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend_title="Tipo"
+    )
     st.plotly_chart(fig1, use_container_width=True)
 
 with col_g2:
@@ -152,15 +162,26 @@ with col_g2:
         title="Total de Cajas por Pedido",
         color_discrete_sequence=["#e67e22"]
     )
-    fig2.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+    fig2.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)"
+    )
     st.plotly_chart(fig2, use_container_width=True)
 
 st.divider()
 
+# --- HISTORIAL ---
 st.subheader("📋 Historial de Pedidos")
+
 df_tabla = df[["id_pedido", "cajas_chicas", "cajas_grandes", "total_cajas", "estado_pedido"]].copy()
 df_tabla.columns = ["N° Pedido", "Cajas Chicas", "Cajas Grandes", "Total Cajas", "Estado"]
-st.dataframe(df_tabla, use_container_width=True, hide_index=True)
 
+st.dataframe(
+    df_tabla,
+    use_container_width=True,
+    hide_index=True,
+)
+
+# --- AUTO REFRESH cada 3 segundos ---
 time.sleep(3)
 st.rerun()
